@@ -4,6 +4,8 @@
 #include "PID.h"
 #include <math.h>
 
+using namespace std;
+
 // for convenience
 using json = nlohmann::json;
 
@@ -28,52 +30,182 @@ std::string hasData(std::string s) {
   return "";
 }
 
+void reset_simulator(uWS::WebSocket<uWS::SERVER>& ws)
+{
+  // reset
+  std::string msg("42[\"reset\", {}]");
+  ws.send(msg.data(), msg.length(), uWS::OpCode::TEXT);
+}
+
+
 int main()
 {
   uWS::Hub h;
 
+  std::vector<double> p(6);
+  //p  = {0.221538,0.00031727,7.33428,0.2,0.0,8.0};
+  p  = {0.221638,0.000318062,7.33428,0.2,-0.00000281874,7.97941};
+
+  std::vector<double> dp(6);
+  dp  = {0.0001,0.0000005,0.0007,0.001,0.000001,0.1};
+  double sum_pd = 6.0;
+
   PID pid;
-  // TODO: Initialize the pid variable.
+  PID pidSpeed;
 
-  h.onMessage([&pid](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length, uWS::OpCode opCode) {
-    // "42" at the start of the message means there's a websocket message event.
-    // The 4 signifies a websocket message
-    // The 2 signifies a websocket event
-    if (length && length > 2 && data[0] == '4' && data[1] == '2')
-    {
-      auto s = hasData(std::string(data).substr(0, length));
-      if (s != "") {
-        auto j = json::parse(s);
-        std::string event = j[0].get<std::string>();
-        if (event == "telemetry") {
-          // j[1] is the data JSON object
-          double cte = std::stod(j[1]["cte"].get<std::string>());
-          double speed = std::stod(j[1]["speed"].get<std::string>());
-          double angle = std::stod(j[1]["steering_angle"].get<std::string>());
-          double steer_value;
-          /*
-          * TODO: Calcuate steering value here, remember the steering value is
-          * [-1, 1].
-          * NOTE: Feel free to play around with the throttle and speed. Maybe use
-          * another PID controller to control the speed!
-          */
-          
-          // DEBUG
-          std::cout << "CTE: " << cte << " Steering Value: " << steer_value << std::endl;
+  pid.Init(p[0], p[1], p[2]);
+  pidSpeed.Init(p[3], p[4], p[5]);
 
-          json msgJson;
-          msgJson["steering_angle"] = steer_value;
-          msgJson["throttle"] = 0.3;
-          auto msg = "42[\"steer\"," + msgJson.dump() + "]";
-          std::cout << msg << std::endl;
+  bool twiddle = FALSE;
+  bool first_run = TRUE;
+  double best_error = 0.0;
+  double current_error = 0.0;
+  int twiddle_counter = 0;
+  int value_iter = 0;
+  bool twiddle_higher = FALSE;
+  bool twiddle_lower = FALSE;
+  double avg_speed = 0.0;
+
+
+  h.onMessage([&pid, &pidSpeed, &twiddle_counter, &value_iter, &twiddle_higher, &twiddle_lower, &best_error, &current_error, &first_run, &twiddle, &sum_pd, &p, &dp, &avg_speed](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length, uWS::OpCode opCode) {
+      twiddle_counter += 1;
+      if (twiddle == TRUE){
+        if (twiddle_counter > 6000){
+          if (first_run == TRUE){
+            first_run = FALSE;
+            best_error = pid.total_error/avg_speed;
+            pid.Init(p[0], p[1], p[2]);
+            pidSpeed.Init(p[3], p[4], p[5]);
+            reset_simulator(ws);
+            twiddle_counter = 0;
+          }else if(sum_pd > 0.0001){
+            if(twiddle_higher == FALSE){
+              twiddle_higher = TRUE;
+              p[value_iter] += dp[value_iter];
+              pid.Init(p[0], p[1], p[2]);
+              pidSpeed.Init(p[3], p[4], p[5]);
+              reset_simulator(ws);
+              twiddle_counter = 0;
+            }else if(twiddle_lower == FALSE){
+              current_error = pid.total_error/avg_speed;
+              if(current_error < best_error){
+                best_error = current_error;
+                dp[value_iter] *= 1.1;
+                value_iter = (value_iter + 1) % 6;
+                twiddle_higher = FALSE;
+              }else{
+                twiddle_lower = TRUE;
+                p[value_iter] -= 2.0 * dp[value_iter];
+                pid.Init(p[0], p[1], p[2]);
+                pidSpeed.Init(p[3], p[4], p[5]);
+                reset_simulator(ws);
+                pid.Init(p[0], p[1], p[2]);
+                pidSpeed.Init(p[3], p[4], p[5]);
+                reset_simulator(ws);
+                twiddle_counter = 0;
+              }
+            }else{
+              current_error = pid.total_error/avg_speed;
+              if(current_error < best_error){
+                best_error = current_error;
+                dp[value_iter] *= 1.1;
+                value_iter = (value_iter + 1) % 6;
+                twiddle_higher = FALSE;
+                twiddle_lower = FALSE;
+              }else{
+                p[value_iter] += dp[value_iter];
+                dp[value_iter] *= 0.9;
+                value_iter = (value_iter + 1) % 6;
+                twiddle_higher = FALSE;
+                twiddle_lower = FALSE;
+              }
+              sum_pd = 0.0;
+              for(int i=0; i<6; i++) {
+                sum_pd += dp[i];
+              }
+            }
+          }else{
+            pid.Init(p[0], p[1], p[2]);
+            pidSpeed.Init(p[3], p[4], p[5]);
+            reset_simulator(ws);
+            twiddle = FALSE;
+          }
+          if(twiddle_counter == 0.0){
+            avg_speed = 0.0;
+
+            std::cout << "Sum PD " << sum_pd << std::endl;
+            std::cout << "Best Error " << best_error << "Current "<< current_error << std::endl;
+            std::cout << "Twiddled Values: " << p[0] << "/" << p[1] << "/" << p[2] << "/" << p[3] << "/" << p[4] << "/" << p[5] << std::endl;
+          }
+        }
+      }
+
+
+      // "42" at the start of the message means there's a websocket message event.
+      // The 4 signifies a websocket message
+      // The 2 signifies a websocket event
+      if (length && length > 2 && data[0] == '4' && data[1] == '2')
+      {
+        auto s = hasData(std::string(data).substr(0, length));
+        if (s != "") {
+          auto j = json::parse(s);
+          std::string event = j[0].get<std::string>();
+          if (event == "telemetry") {
+            // j[1] is the data JSON object
+            double cte = std::stod(j[1]["cte"].get<std::string>());
+            double speed = std::stod(j[1]["speed"].get<std::string>());
+            double angle = std::stod(j[1]["steering_angle"].get<std::string>());
+
+            double steer_value;
+            double throttle;
+            /*
+            * TODO: Calcuate steering value here, remember the steering value is
+            * [-1, 1].
+            * NOTE: Feel free to play around with the throttle and speed. Maybe use
+            * another PID controller to control the speed!
+            */
+            avg_speed += speed;
+
+
+
+            pid.UpdateError(cte);
+            pid.TotalError();
+
+            steer_value = - (pid.Kp * pid.p_error) - (pid.Ki * pid.i_error) - (pid.Kd * pid.d_error);
+            if (steer_value > 1.0){
+              steer_value = 1.0;
+            }
+            if (steer_value < - 1.0){
+              steer_value = - 1.0;
+            }
+
+            pidSpeed.UpdateError(cte);
+            pidSpeed.TotalError();
+
+            //throttle = 1.0 - std::abs(steer_value);
+            throttle = - (pid.Kp * pid.p_error) - (pid.Ki * pid.i_error) - (pid.Kd * pid.d_error);
+            throttle = 2.0 * (1.0 - std::abs(throttle));
+            if (throttle < - 0.5){
+              throttle = -0.5;
+            }
+
+            // DEBUG
+            //std::cout << "CTE: " << cte << " Steering Value: " << steer_value << std::endl;
+
+            json msgJson;
+            msgJson["steering_angle"] = steer_value;
+            msgJson["throttle"] = throttle;
+            auto msg = "42[\"steer\"," + msgJson.dump() + "]";
+            //std::cout << msg << std::endl;
+            ws.send(msg.data(), msg.length(), uWS::OpCode::TEXT);
+
+          }
+        } else {
+          // Manual driving
+          std::string msg = "42[\"manual\",{}]";
           ws.send(msg.data(), msg.length(), uWS::OpCode::TEXT);
         }
-      } else {
-        // Manual driving
-        std::string msg = "42[\"manual\",{}]";
-        ws.send(msg.data(), msg.length(), uWS::OpCode::TEXT);
       }
-    }
   });
 
   // We don't need this since we're not using HTTP but if it's removed the program
