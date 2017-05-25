@@ -44,8 +44,6 @@ int main()
   uWS::Hub h;
 
   std::vector<double> p(6);
-  //p  = {0.221538,0.00031727,7.33428,0.2,0.0,8.0};
-  // p  = {0.2,0.001,6.0,0.2,0.0,8.0};
   //p = {0.4979, 0.000730566, 5.63597, 0.101509, 0.00199, 7.07897};
   p = {0.3479, 0.000730566, 6.63597, 0.001509, -0.000199, 16.07897};
 
@@ -71,6 +69,8 @@ int main()
 
 
   h.onMessage([&pid, &pidSpeed, &twiddle_counter, &value_iter, &twiddle_higher, &twiddle_lower, &best_error, &current_error, &first_run, &twiddle, &sum_pd, &p, &dp, &avg_speed](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length, uWS::OpCode opCode) {
+
+      //TWIDDLE ALGORITHM:
       twiddle_counter += 1;
       if (twiddle == TRUE){
         if (twiddle_counter > 6000){
@@ -143,6 +143,7 @@ int main()
         }
       }
 
+      //PID ALGORITHM
 
       // "42" at the start of the message means there's a websocket message event.
       // The 4 signifies a websocket message
@@ -161,12 +162,7 @@ int main()
 
             double steer_value;
             double throttle;
-            /*
-            * TODO: Calcuate steering value here, remember the steering value is
-            * [-1, 1].
-            * NOTE: Feel free to play around with the throttle and speed. Maybe use
-            * another PID controller to control the speed!
-            */
+
             avg_speed += speed;
 
             pid.UpdateError(cte);
