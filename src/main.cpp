@@ -1,5 +1,6 @@
 #include <uWS/uWS.h>
 #include <iostream>
+#include <sys/time.h>
 #include "json.hpp"
 #include "PID.h"
 #include <math.h>
@@ -44,10 +45,12 @@ int main()
 
   std::vector<double> p(6);
   //p  = {0.221538,0.00031727,7.33428,0.2,0.0,8.0};
-  p  = {0.221638,0.000318062,7.33428,0.2,-0.00000281874,7.97941};
+  // p  = {0.2,0.001,6.0,0.2,0.0,8.0};
+  //p = {0.4979, 0.000730566, 5.63597, 0.101509, 0.00199, 7.07897};
+  p = {0.3479, 0.000730566, 6.63597, 0.001509, -0.000199, 16.07897};
 
   std::vector<double> dp(6);
-  dp  = {0.0001,0.0000005,0.0007,0.001,0.000001,0.1};
+  dp  = {0.1,0.001,1.0,0.1,0.001,1.0};
   double sum_pd = 6.0;
 
   PID pid;
@@ -166,8 +169,6 @@ int main()
             */
             avg_speed += speed;
 
-
-
             pid.UpdateError(cte);
             pid.TotalError();
 
@@ -184,7 +185,7 @@ int main()
 
             //throttle = 1.0 - std::abs(steer_value);
             throttle = - (pid.Kp * pid.p_error) - (pid.Ki * pid.i_error) - (pid.Kd * pid.d_error);
-            throttle = 2.0 * (1.0 - std::abs(throttle));
+            throttle = (0.9 - std::abs(throttle));
             if (throttle < - 0.5){
               throttle = -0.5;
             }
